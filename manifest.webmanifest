@@ -1,0 +1,19 @@
+{
+  "name": "血压日记",
+  "short_name": "血压日记",
+  "description": "每天早晚记录血压，查看趋势，AI 健康助手给出评估建议。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f7f9",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
