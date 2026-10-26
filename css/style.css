@@ -135,6 +135,7 @@ input { font-family: inherit; font-size: 16px; }
 .reading-field input {
   width: 100%;
   min-width: 0;
+  min-height: 44px;
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 9px;
@@ -172,6 +173,7 @@ input { font-family: inherit; font-size: 16px; }
 .btn {
   border-radius: 12px;
   padding: 11px 16px;
+  min-height: 44px;
   font-size: 14px;
   font-weight: 600;
   transition: transform .12s, opacity .15s, background .15s;
@@ -185,7 +187,16 @@ input { font-family: inherit; font-size: 16px; }
 .btn-row { display: flex; gap: 8px; margin-top: 12px; }
 .btn-row .btn { padding: 9px 10px; font-size: 13px; }
 
-.link-btn { font-size: 13px; color: var(--primary); font-weight: 600; }
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 8px;
+  margin: -10px -8px;
+  font-size: 13px;
+  color: var(--primary);
+  font-weight: 600;
+}
 
 /* ---------- 分段控件 ---------- */
 .seg {
@@ -198,6 +209,7 @@ input { font-family: inherit; font-size: 16px; }
 .seg-btn {
   flex: 1;
   padding: 8px 0;
+  min-height: 42px;
   font-size: 13px;
   border-radius: 10px;
   color: var(--ink-2);
@@ -291,17 +303,31 @@ input { font-family: inherit; font-size: 16px; }
 .quick-row::-webkit-scrollbar { display: none; }
 .chip {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 7px 14px;
+  padding: 0 16px;
   font-size: 12.5px;
   color: var(--ink-2);
   box-shadow: 0 2px 6px rgba(22,50,60,.04);
+  white-space: nowrap;
 }
 .chip:active { background: var(--primary-soft); }
 
-.chat { display: grid; gap: 10px; margin-bottom: 12px; }
+.chat {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  margin-bottom: 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 4px 2px 2px;
+}
 .msg { display: flex; }
 .msg.user { justify-content: flex-end; }
 .bubble {

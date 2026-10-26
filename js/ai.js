@@ -156,7 +156,7 @@
     renderChat(db);
   }
 
-  function renderChat(db, scroll) {
+  function renderChat(db) {
     var box = $('#chatBox');
     var msgs = db.ai.messages || [];
     if (!msgs.length) {
@@ -167,9 +167,7 @@
     msgs.forEach(function (m) {
       box.appendChild(bubble(m.role, m.content));
     });
-    if (scroll && box.lastElementChild) {
-      box.lastElementChild.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
+    box.scrollTop = box.scrollHeight;
   }
 
   function bubble(role, text) {
@@ -190,8 +188,9 @@
     b.className = 'bubble loading';
     b.textContent = '正在分析你的血压数据…';
     wrap.appendChild(b);
-    $('#chatBox').appendChild(wrap);
-    wrap.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    var box = $('#chatBox');
+    box.appendChild(wrap);
+    box.scrollTop = box.scrollHeight;
   }
 
   function removeLoading() {
@@ -241,7 +240,7 @@
     db.ai.messages.push({ role: 'user', content: text, ts: Date.now() });
     if (db.ai.messages.length > 60) db.ai.messages = db.ai.messages.slice(-60);
     BP.save(db);
-    renderChat(db, true);
+    renderChat(db);
     $('#chatInput').value = '';
 
     busy = true;
@@ -281,7 +280,7 @@
     db.ai.messages.push({ role: 'assistant', content: reply, ts: Date.now() });
     if (db.ai.messages.length > 60) db.ai.messages = db.ai.messages.slice(-60);
     BP.save(db);
-    renderChat(db, true);
+    renderChat(db);
     busy = false;
   }
 
