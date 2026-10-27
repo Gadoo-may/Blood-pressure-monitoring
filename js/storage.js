@@ -5,6 +5,7 @@ var BP = (function () {
   'use strict';
 
   var KEY = 'bp_log_v1';
+  var BACKUP_KEY = 'bp_log_v1_backup';
 
   var DEFAULT_DB = {
     version: 1,
@@ -36,7 +37,43 @@ var BP = (function () {
 
   function save(db) {
     try {
-      localStorage.setItem(KEY, JSON.stringify(db));
+      var raw = JSON.stringify(db);
+      var prev = null;
+      try { prev = localStorage.getItem(KEY); } catch (e2) { prev = null; }
+      localStorage.setItem(KEY, raw);
+      // 每次保存前把旧数据留在备份里，误清空/误导入后可恢复到上一次保存前
+      if (prev) {
+        try { localStorage.setItem(BACKUP_KEY, JSON.stringify({ savedAt: Date.now(), raw: prev })); } catch (e3) {}
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /* ---------- 上次保存前的备份 ---------- */
+  function backupInfo() {
+    try {
+      var b = JSON.parse(localStorage.getItem(BACKUP_KEY) || 'null');
+      if (!b || !b.raw) return null;
+      var d = JSON.parse(b.raw);
+      var t = new Date(b.savedAt);
+      return {
+        days: Object.keys(d.records || {}).length,
+        savedAt: b.savedAt,
+        time: (t.getMonth() + 1) + '月' + t.getDate() + '日 ' + pad(t.getHours()) + ':' + pad(t.getMinutes())
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function restoreBackup() {
+    try {
+      var b = JSON.parse(localStorage.getItem(BACKUP_KEY) || 'null');
+      if (!b || !b.raw) return false;
+      JSON.parse(b.raw);
+      localStorage.setItem(KEY, b.raw);
       return true;
     } catch (e) {
       return false;
@@ -252,6 +289,8 @@ var BP = (function () {
     stats: stats,
     trend: trend,
     exportJSON: exportJSON,
-    importJSON: importJSON
+    importJSON: importJSON,
+    backupInfo: backupInfo,
+    restoreBackup: restoreBackup
   };
 })();

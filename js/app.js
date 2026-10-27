@@ -4,7 +4,10 @@
 (function () {
   'use strict';
 
-  var state = { range: 7, view: 'entry' };
+  var state = { range: 7, view: 'entry', entryKey: null, backfill: false };
+  var entryDirty = false;
+
+  function pad2(n) { return n < 10 ? '0' + n : '' + n; }
 
   /* ---------------- 通用工具 ---------------- */
   function $(sel, root) { return (root || document).querySelector(sel); }
@@ -44,9 +47,13 @@
    * ========================================================= */
   function renderEntry() {
     var db = BP.load();
-    var key = BP.dateKey();
+    var today = BP.dateKey();
+    if (!state.backfill || !state.entryKey) state.entryKey = today;
+    if (state.entryKey > today) { state.entryKey = today; state.backfill = false; }
+    var key = state.entryKey;
+    var isPast = key < today;
 
-    $('#entryDate').textContent = BP.humanDate(key);
+    $('#entryDate').textContent = BP.humanDate(key) + (isPast ? ' · 补录' : '');
     $('#entryWeekday').textContent = BP.weekday(key) + ' · ' + key;
 
     var done = 0;
@@ -54,16 +61,26 @@
     if (BP.getSlot(db, key, 'evening')) done++;
     $('#entryProgress').textContent = done + ' / 2';
 
-    var morningWin = BP.windowState(key, 'morning');
-    var eveningWin = BP.windowState(key, 'evening');
     var hint;
-    if (morningWin.open) hint = '早间记录中 · 中午 12:00 后早间数据将锁定';
-    else if (eveningWin.open) hint = '晚间记录中 · 凌晨 00:00 后晚间数据将锁定';
-    else if (done === 2) hint = '今天两次记录已完成，明天见';
-    else hint = '今天的填写时间已过，明天记得按时测量';
+    if (isPast) {
+      hint = '补录模式：可补填 ' + BP.humanDate(key) + ' 的早晚数据，保存后计入该日记录';
+    } else {
+      var morningWin = BP.windowState(key, 'morning');
+      var eveningWin = BP.windowState(key, 'evening');
+      if (morningWin.open) hint = '早间记录中 · 中午 12:00 后早间数据将锁定';
+      else if (eveningWin.open) hint = '晚间记录中 · 凌晨 00:00 后晚间数据将锁定';
+      else if (done === 2) hint = '今天两次记录已完成，明天见';
+      else hint = '今天的填写时间已过，明天记得按时测量';
+    }
     $('#entryHint').textContent = hint;
 
-    $('#entryCards').innerHTML = slotCard(db, key, 'morning') + slotCard(db, key, 'evening');
+    $('#entryCards').innerHTML = slotCard(db, key, 'morning', isPast) + slotCard(db, key, 'evening', isPast);
+
+    $('#backfillPanel').hidden = !state.backfill;
+    $('#btnBackfill').textContent = state.backfill ? '取消补录' : '补录以往数据';
+    $('#backfillDate').max = today;
+    $('#backfillDate').value = state.backfill ? key : '';
+    entryDirty = false;
 
     $$('.slot-actions .btn[data-save]').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -73,22 +90,26 @@
 
     $$('.slot').forEach(function (card) {
       $$('input', card).forEach(function (inp) {
-        inp.addEventListener('input', function () { updateAvg(card); });
+        inp.addEventListener('input', function () {
+          entryDirty = true;
+          updateAvg(card);
+        });
       });
     });
   }
 
-  function slotCard(db, key, slot) {
+  function slotCard(db, key, slot, isPast) {
     var isMorning = slot === 'morning';
     var rec = BP.getSlot(db, key, slot);
     var win = BP.windowState(key, slot);
-    var editable = win.open;
+    var editable = isPast || win.open;
 
     var readings = rec ? rec.readings.slice(0, 2) : [];
     while (readings.length < 2) readings.push({ sys: '', dia: '', pulse: '' });
 
     var badge;
-    if (!editable) badge = '<span class="badge closed">' + (win.future ? '未开始' : '已锁定') + '</span>';
+    if (isPast) badge = '<span class="badge done">' + (rec ? '补录 · 可修改' : '可补录') + '</span>';
+    else if (!editable) badge = '<span class="badge closed">' + (win.future ? '未开始' : '已锁定') + '</span>';
     else if (rec) badge = '<span class="badge done">已保存 · 可修改</span>';
     else badge = '<span class="badge open">可填写</span>';
 
@@ -135,7 +156,9 @@
         '</div>' +
         (editable
           ? '<div class="slot-actions"><button class="btn primary" data-save="' + slot + '">' + (rec ? '更新数据' : '保存数据') + '</button></div>' +
-            '<div class="slot-note">只填一次也可以，平均值按已填的次数计算</div>'
+            '<div class="slot-note">' +
+              (isPast ? '补录不受早晚时间限制，保存后计入 ' + BP.humanDate(key) : '只填一次也可以，平均值按已填的次数计算') +
+            '</div>'
           : '<div class="slot-note">' + esc(win.reason) + '</div>') +
       '</div>';
   }
@@ -199,8 +222,10 @@
       if (pulse !== null && (pulse < 30 || pulse > 200)) { toast('心率数值异常（30~200）'); return; }
     }
 
-    var win = BP.windowState(key, slot);
-    if (!win.open) { toast(win.reason); renderEntry(); return; }
+    if (key >= BP.dateKey()) {
+      var win = BP.windowState(key, slot);
+      if (!win.open) { toast(win.reason); renderEntry(); return; }
+    }
 
     var db = BP.load();
     BP.saveSlot(db, key, slot, readings);
@@ -235,6 +260,31 @@
     drawChart(pts);
 
     renderRecordList(db, n);
+    renderStorageInfo(db);
+  }
+
+  // 本机数据状况：记录天数、最近保存时间、可恢复的备份
+  function renderStorageInfo(db) {
+    var el = $('#storageInfo');
+    if (!el) return;
+    var keys = Object.keys(db.records || {});
+    var latest = 0;
+    keys.forEach(function (k) {
+      ['morning', 'evening'].forEach(function (s) {
+        var rec = db.records[k][s];
+        if (rec && rec.savedAt) latest = Math.max(latest, rec.savedAt);
+      });
+    });
+    var text = keys.length ? '本机共 ' + keys.length + ' 天记录' : '本机暂无记录';
+    if (latest) {
+      var t = new Date(latest);
+      text += ' · 最近保存 ' + (t.getMonth() + 1) + '月' + t.getDate() + '日 ' + pad2(t.getHours()) + ':' + pad2(t.getMinutes());
+    }
+    var b = BP.backupInfo();
+    text += b
+      ? ' · 可恢复到上次保存前（' + b.time + '，' + b.days + ' 天）'
+      : ' · 暂无可恢复备份';
+    el.textContent = text;
   }
 
   function statCard(label, value, unit, sub) {
@@ -430,6 +480,27 @@
       });
     });
 
+    // 补录：选择过去的日期，不受早晚时间限制
+    $('#btnBackfill').addEventListener('click', function () {
+      state.backfill = !state.backfill;
+      state.entryKey = BP.dateKey();
+      renderEntry();
+    });
+    $('#backfillDate').addEventListener('change', function () {
+      var v = this.value;
+      if (!v) return;
+      var today = BP.dateKey();
+      if (v > today) { toast('不能补录未来的日期'); this.value = state.entryKey || today; return; }
+      state.backfill = true;
+      state.entryKey = v;
+      renderEntry();
+    });
+    $('#btnBackToday').addEventListener('click', function () {
+      state.backfill = false;
+      state.entryKey = BP.dateKey();
+      renderEntry();
+    });
+
     $('#btnExport').addEventListener('click', exportData);
     $('#btnImport').addEventListener('click', function () { $('#fileInput').click(); });
     $('#fileInput').addEventListener('change', function (e) {
@@ -437,7 +508,7 @@
       e.target.value = '';
     });
     $('#btnClear').addEventListener('click', function () {
-      if (!confirm('确定要清空所有血压记录吗？此操作不可恢复，建议先导出备份。')) return;
+      if (!confirm('确定要清空所有血压记录吗？清空后可用「恢复到上次保存前」找回，仍建议先导出备份。')) return;
       var db = BP.load();
       db.records = {};
       BP.save(db);
@@ -446,14 +517,27 @@
       renderEntry();
     });
 
+    $('#btnRestore').addEventListener('click', function () {
+      var info = BP.backupInfo();
+      if (!info) { toast('暂无可恢复的备份'); return; }
+      if (!confirm('将恢复到上一次保存前的数据（' + info.time + '，共 ' + info.days + ' 天记录），当前记录会被覆盖。继续？')) return;
+      if (BP.restoreBackup()) {
+        toast('已恢复');
+        renderRecords();
+        renderEntry();
+      } else {
+        toast('恢复失败');
+      }
+    });
+
     renderEntry();
     window.addEventListener('resize', function () {
       if (state.view === 'records') renderRecords();
     });
 
-    // 每分钟刷新一次填写页的开放状态
+    // 每分钟刷新一次填写页的开放状态（有未保存的输入时不刷新，避免清掉内容）
     setInterval(function () {
-      if (state.view === 'entry') renderEntry();
+      if (state.view === 'entry' && !entryDirty) renderEntry();
     }, 60000);
   }
 

@@ -86,6 +86,18 @@ input { font-family: inherit; font-size: 16px; }
 }
 .hero-hint { margin-top: 12px; font-size: 12px; opacity: .78; }
 
+/* ---------- 补录 ---------- */
+.backfill-row { display: flex; justify-content: flex-end; margin: -4px 0 10px; }
+.backfill-panel {
+  background: var(--card);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.backfill-panel .field { margin-bottom: 12px; }
+.backfill-panel .btn { width: 100%; }
+
 /* ---------- 卡片 ---------- */
 .card {
   background: var(--card);
