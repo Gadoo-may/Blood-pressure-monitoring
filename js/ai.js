@@ -25,35 +25,75 @@
   var busy = false;
 
   /* ---------------- 数据上下文 ---------------- */
+  function hasData(day) {
+    return !!(day && (day.morning || day.evening));
+  }
+
+  // 统计本次要带给 AI 的数据（最多最近 30 个记录日）
+  function contextStats(db) {
+    var keys = Object.keys(db.records || {}).filter(function (k) {
+      return hasData(db.records[k]);
+    }).sort().slice(-30);
+
+    var slots = 0, readings = 0;
+    keys.forEach(function (k) {
+      ['morning', 'evening'].forEach(function (s) {
+        var rec = db.records[k][s];
+        if (rec && rec.avg) {
+          slots++;
+          readings += (rec.readings || []).length;
+        }
+      });
+    });
+
+    var now = new Date();
+    var weekStart = BP.dateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6));
+    return {
+      keys: keys,
+      days: keys.length,
+      slots: slots,
+      readings: readings,
+      weekStart: weekStart,
+      weekDays: keys.filter(function (k) { return k >= weekStart; }).length
+    };
+  }
+
   function buildContext(db) {
     var p = db.settings.profile || {};
-    var keys = BP.recentKeys(db, 7).reverse();
-    var lines = [];
+    var c = contextStats(db);
+    var today = BP.dateKey();
 
-    if (!keys.length) {
-      return '用户最近 7 天没有任何血压记录。\n';
+    if (!c.days) {
+      return '当前没有任何血压记录（今天是 ' + today + '）。请简短给出测量建议，并说明暂时无法评估趋势。\n';
     }
 
-    lines.push('以下是用户最近 7 天的血压记录（每天早晚各测两次，取平均值为最终数据）：');
-    keys.forEach(function (k) {
+    var lines = [];
+    lines.push('当前日期：' + today + '（' + BP.weekday(today) + '）');
+    lines.push('数据范围：' + c.keys[0] + ' ~ ' + c.keys[c.keys.length - 1] +
+      '，共 ' + c.days + ' 天记录、' + c.slots + ' 个时段、' + c.readings + ' 条读数。');
+    lines.push('最近 7 天（' + c.weekStart + ' ~ ' + today + '）内有 ' + c.weekDays + ' 天记录。');
+    lines.push('');
+    lines.push('逐日记录（早/晚均为两次测量的平均值）：');
+
+    c.keys.forEach(function (k) {
       var day = db.records[k];
       var parts = [];
       ['morning', 'evening'].forEach(function (slot) {
         var rec = day[slot];
         if (!rec || !rec.avg) return;
-        var raw = rec.readings.map(function (r) {
+        var raw = (rec.readings || []).map(function (r) {
           return r.sys + '/' + r.dia + (r.pulse ? '(脉' + r.pulse + ')' : '');
         }).join('、');
-        parts.push((slot === 'morning' ? '早' : '晚') + '：' + rec.avg.sys + '/' + rec.avg.dia + ' mmHg' +
+        parts.push((slot === 'morning' ? '早' : '晚') + ' ' + rec.avg.sys + '/' + rec.avg.dia +
           (rec.avg.pulse ? '，心率 ' + rec.avg.pulse : '') + '（原始：' + raw + '）');
       });
-      if (parts.length) lines.push(k + '（' + BP.weekday(k) + '）' + parts.join('；'));
+      if (parts.length) lines.push('· ' + k + '（' + BP.weekday(k) + '）：' + parts.join('；'));
     });
 
     var s = BP.stats(db, 7);
     if (s.days) {
       lines.push('');
-      lines.push('近 7 天统计：平均 ' + s.sys + '/' + s.dia + ' mmHg，平均心率 ' + (s.pulse || '--') +
+      lines.push('最近 7 个记录日统计：平均 ' + s.sys + '/' + s.dia + ' mmHg，平均心率 ' + (s.pulse || '--') +
         '，正常天数占比 ' + s.okRate + '%（正常标准：低于 120/80 mmHg）。');
     }
 
@@ -62,19 +102,25 @@
     if (p.gender) info.push('性别 ' + p.gender);
     if (info.length) lines.push('个人信息：' + info.join('，') + '。');
 
+    lines.push('');
+    lines.push('说明：以上数据由应用在本次提问时实时读取，最新且完整；引用记录天数、时段数时必须与上面的数字一致，不要沿用历史对话里的旧数据。');
+
     return lines.join('\n');
   }
 
   function systemPrompt(db) {
+    var today = BP.dateKey();
     return [
-      '你是一位耐心、专业的家庭血压管理健康助手。',
-      '请基于用户提供的血压记录，用简体中文回答，要求：',
-      '1. 先给出总体判断（是否稳定、有无异常波动、是否处于正常血压范围，即低于 120/80 mmHg）；',
-      '2. 指出需要关注的具体数据和时间段；',
-      '3. 给出可执行的饮食、运动、作息、测量习惯建议；',
-      '4. 如果出现明显高危数值（如收缩压 ≥180 或舒张压 ≥110，或伴随异常症状），明确提示尽快就医；',
-      '5. 语言通俗、分点陈述、简洁，不要长篇大论，不要编造记录中不存在的数据；',
-      '6. 结尾提醒 AI 建议不能替代医生诊断。'
+      '你是一位温和、专业、说话自然的家庭血压健康助手，像一位懂医学也懂生活的朋友。',
+      '今天是 ' + today + '（' + BP.weekday(today) + '）。',
+      '回答时请：',
+      '1. 先给结论，口语化表达，不要每次都套用固定小标题或模板；',
+      '2. 只引用本次提供的数据，日期和数值要准确；提到记录天数时必须与数据中的天数一致；',
+      '3. 建议要具体可执行（吃、动、睡、怎么测），整体控制在 300 字左右；',
+      '4. 用户只是追问或闲聊时简短回应，不用重复整份报告；',
+      '5. 出现收缩压 ≥180、舒张压 ≥110，或胸痛、呼吸困难、视物模糊等情况，明确建议尽快就医；',
+      '6. 本次数据是最新的，如与之前对话的结论冲突，一律以本次数据为准；',
+      '7. 不要编造记录中不存在的数据，结尾用一句话提醒 AI 建议不能替代医生诊断（措辞可变化）。'
     ].join('\n');
   }
 
@@ -153,7 +199,19 @@
       : '尚未配置 API，当前使用本地规则分析';
     $('#btnToggleApi').textContent = configured ? '修改' : '设置';
 
+    updateScope(db);
     renderChat(db);
+  }
+
+  // 页面上显示本次会带给 AI 的数据范围，方便核对
+  function updateScope(db) {
+    var el = $('#aiScope');
+    if (!el) return;
+    var c = contextStats(db);
+    el.textContent = c.days
+      ? '本次已带入 ' + c.days + ' 天记录（' + BP.humanDate(c.keys[0]) + '–' +
+        BP.humanDate(c.keys[c.keys.length - 1]) + '）· ' + c.slots + ' 个时段 · ' + c.readings + ' 条读数'
+      : '暂无血压记录，AI 只能给出通用建议';
   }
 
   function renderChat(db) {
@@ -211,8 +269,8 @@
       body: JSON.stringify({
         model: cfg.model || 'deepseek-chat',
         messages: messages,
-        temperature: 0.6,
-        max_tokens: 1000
+        temperature: 0.7,
+        max_tokens: 1200
       })
     }).then(function (res) {
       if (!res.ok) {
@@ -229,7 +287,8 @@
   }
 
   /* ---------------- 发送 ---------------- */
-  function ask(text) {
+  // fresh 为 true 时是一次独立分析（周报/快捷问题）：不携带旧对话，避免模型沿用旧结论
+  function ask(text, fresh) {
     if (busy) return;
     text = (text || '').trim();
     if (!text) return;
@@ -240,6 +299,7 @@
     db.ai.messages.push({ role: 'user', content: text, ts: Date.now() });
     if (db.ai.messages.length > 60) db.ai.messages = db.ai.messages.slice(-60);
     BP.save(db);
+    updateScope(db);
     renderChat(db);
     $('#chatInput').value = '';
 
@@ -254,9 +314,11 @@
       return;
     }
 
-    var history = db.ai.messages.slice(-10).map(function (m) {
-      return { role: m.role, content: m.content };
-    });
+    var history = fresh
+      ? [{ role: 'user', content: text }]
+      : db.ai.messages.slice(-6).map(function (m) {
+          return { role: m.role, content: m.content };
+        });
 
     var messages = [
       { role: 'system', content: systemPrompt(db) },
@@ -319,7 +381,7 @@
       toast('配置已保存');
       render();
       if (firstTime) {
-        setTimeout(function () { ask('请根据我最近一周的血压数据，给出整体评估和建议。'); }, 400);
+        setTimeout(function () { ask('请根据我最近一周的血压数据，给出整体评估和建议。', true); }, 400);
       }
     });
 
@@ -332,7 +394,7 @@
     });
 
     Array.prototype.forEach.call(document.querySelectorAll('.chip'), function (c) {
-      c.addEventListener('click', function () { ask(c.dataset.ask); });
+      c.addEventListener('click', function () { ask(c.dataset.ask, true); });
     });
 
     render();
